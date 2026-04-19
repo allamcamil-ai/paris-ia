@@ -713,6 +713,99 @@ def migrate_csv():
     return jsonify({"status": "ok", "migrated": nb})
 
 
+@app.route("/api/import-historique", methods=["POST"])
+def api_import_historique():
+    """Télécharge tous les matchs FT de la saison 2024 via API-Football
+    et les insère dans historique_matchs (sans doublons)."""
+    if not API_FOOTBALL_KEY:
+        return jsonify({"error": "API_FOOTBALL_KEY non configurée"}), 400
+
+    headers = {"x-apisports-key": API_FOOTBALL_KEY}
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_inseres = 0
+    total_doublons = 0
+    errors = []
+
+    for nom, lid in LIGUES_FOOTBALL.items():
+        log_activity("import", f"Import historique {nom}…")
+        page = 1
+        while True:
+            try:
+                resp = requests.get(
+                    "https://v3.football.api-sports.io/fixtures",
+                    headers=headers,
+                    params={"league": lid, "season": SAISON, "status": "FT", "page": page},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    errors.append(f"{nom} p{page}: HTTP {resp.status_code}")
+                    break
+
+                data = resp.json()
+                fixtures = data.get("response", [])
+                if not fixtures:
+                    break
+
+                for m in fixtures:
+                    fix   = m["fixture"]
+                    teams = m["teams"]
+                    goals = m["goals"]
+                    dom   = teams["home"]["name"]
+                    ext   = teams["away"]["name"]
+                    bd    = goals.get("home")
+                    be    = goals.get("away")
+                    date  = (fix.get("date") or "")[:10]
+
+                    if bd is None or be is None or not date:
+                        continue
+
+                    resultat = "H" if bd > be else ("A" if bd < be else "D")
+
+                    # Évite les doublons sans contrainte UNIQUE sur la table
+                    c.execute(
+                        """SELECT 1 FROM historique_matchs
+                           WHERE ligue=? AND date_match=?
+                             AND equipe_domicile=? AND equipe_exterieur=?""",
+                        (nom, date, dom, ext),
+                    )
+                    if c.fetchone():
+                        total_doublons += 1
+                        continue
+
+                    c.execute(
+                        """INSERT INTO historique_matchs
+                           (ligue, date_match, equipe_domicile, equipe_exterieur,
+                            buts_dom, buts_ext, resultat, collecte_le)
+                           VALUES (?,?,?,?,?,?,?,?)""",
+                        (nom, date, dom, ext, bd, be, resultat, now),
+                    )
+                    total_inseres += 1
+
+                paging = data.get("paging", {})
+                if page >= paging.get("total", 1):
+                    break
+                page += 1
+                time.sleep(0.25)  # respect rate-limit API-Football
+
+            except Exception as e:
+                errors.append(f"{nom} p{page}: {e}")
+                break
+
+        conn.commit()
+
+    conn.close()
+    msg = f"✅ {total_inseres} matchs importés, {total_doublons} doublons ignorés"
+    log_activity("import", msg)
+    return jsonify({
+        "status": "ok",
+        "inseres": total_inseres,
+        "doublons": total_doublons,
+        "errors": errors,
+    })
+
+
 # ─────────────────────────────────────────────
 #  PWA FRONTEND (inline HTML — no static files)
 # ─────────────────────────────────────────────
