@@ -189,6 +189,11 @@ def log_activity(type_, message):
         pass
 
 
+# Exécuté à l'import du module (gunicorn, etc.)
+init_db()
+load_subscriptions()
+
+
 # ─────────────────────────────────────────────
 #  DATA COLLECTION
 # ─────────────────────────────────────────────
