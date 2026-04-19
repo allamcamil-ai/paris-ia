@@ -13,7 +13,7 @@ import io
 import time
 import requests
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -21,7 +21,7 @@ from pywebpush import webpush, WebPushException
 
 load_dotenv()
 
-app = Flask(__name__, static_folder="../frontend/build", static_url_path="")
+app = Flask(__name__)
 CORS(app)
 
 # ─────────────────────────────────────────────
@@ -708,13 +708,552 @@ def migrate_csv():
     return jsonify({"status": "ok", "migrated": nb})
 
 
-# Serve React frontend
+# ─────────────────────────────────────────────
+#  PWA FRONTEND (inline HTML — no static files)
+# ─────────────────────────────────────────────
+
+_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>Paris IA</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Paris IA">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0f;--surf:#12121a;--surf2:#1a1a24;
+  --green:#00e68a;--red:#ff4d6a;--amber:#ffb832;--blue:#7b8fff;
+  --text:#f0f0f5;--muted:#7070a0;--border:#252535;
+  --nav:64px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text)}
+
+/* ── LAYOUT ── */
+.panel{display:none;height:calc(100dvh - var(--nav));overflow-y:auto;
+  padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 14px)}
+.panel.active{display:block}
+
+/* ── BOTTOM NAV ── */
+.bnav{
+  position:fixed;bottom:0;left:0;right:0;
+  height:calc(var(--nav) + env(safe-area-inset-bottom,0px));
+  background:var(--surf);border-top:1px solid var(--border);
+  display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom,0px)
+}
+.nbtn{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;background:none;border:none;
+  color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;
+  font-size:11px;font-weight:500;transition:color .2s
+}
+.nbtn.active{color:var(--green)}
+.nbtn svg{width:22px;height:22px;stroke-width:1.8}
+
+/* ── CARDS ── */
+.card{background:var(--surf);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:10px}
+
+/* ── BANKROLL ── */
+.br-card{
+  background:linear-gradient(135deg,#12121a 0%,#0e1a2a 100%);
+  border:1px solid #1e2a3a;border-radius:20px;padding:20px;margin-bottom:10px
+}
+.br-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:2px}
+.br-value{font-size:38px;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1.1}
+.br-net{font-size:13px;font-family:'JetBrains Mono',monospace;margin-top:4px}
+.pos{color:var(--green)}.neg{color:var(--red)}
+
+/* ── SPARKLINE ── */
+.spark{margin-top:14px;height:56px}
+.spark svg{width:100%;height:100%}
+
+/* ── STATS ── */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.scard{background:var(--surf2);border:1px solid var(--border);border-radius:14px;padding:14px 8px;text-align:center}
+.sval{font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.slbl{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* ── SECTION TITLE ── */
+.stitle{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;
+  letter-spacing:1.2px;margin-bottom:8px;margin-top:6px}
+
+/* ── PAGE HEADER ── */
+.phdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-top:6px}
+.ptitle{font-size:20px;font-weight:700}
+.rbtn{background:none;border:1px solid var(--border);border-radius:10px;
+  padding:7px 10px;cursor:pointer;color:var(--muted);font-size:16px;
+  transition:color .2s;line-height:1}
+.rbtn:hover{color:var(--text)}
+
+/* ── PARIS LIST ── */
+.pitem{background:var(--surf);border:1px solid var(--border);border-radius:14px;
+  padding:14px;margin-bottom:8px}
+.phd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px}
+.pmatch{font-weight:600;font-size:14px;line-height:1.3;flex:1}
+.badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;
+  font-family:'JetBrains Mono',monospace;white-space:nowrap;flex-shrink:0}
+.bw{background:rgba(0,230,138,.14);color:var(--green)}
+.bl{background:rgba(255,77,106,.14);color:var(--red)}
+.ba{background:rgba(255,255,255,.07);color:var(--muted)}
+.pmeta{font-size:11px;color:var(--muted)}
+.pdet{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.pd{font-size:11px;color:var(--muted)}
+.pd b{font-family:'JetBrains Mono',monospace;color:var(--text);font-size:12px;font-weight:500}
+
+/* ── FILTER ── */
+.frow{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;padding-bottom:4px}
+.frow::-webkit-scrollbar{display:none}
+.fbtn{flex-shrink:0;padding:6px 14px;border-radius:20px;border:1px solid var(--border);
+  background:none;color:var(--muted);font-family:'DM Sans',sans-serif;
+  font-size:12px;font-weight:500;cursor:pointer;transition:all .2s}
+.fbtn.active{background:var(--green);color:#000;border-color:var(--green)}
+
+/* ── ACTION BUTTONS ── */
+.abtn{
+  width:100%;padding:16px 14px;border-radius:14px;border:none;
+  font-family:'DM Sans',sans-serif;font-size:15px;font-weight:600;
+  cursor:pointer;display:flex;align-items:center;gap:12px;
+  transition:opacity .2s,transform .1s;margin-bottom:10px;text-align:left
+}
+.abtn:active{transform:scale(.97);opacity:.8}
+.abtn:disabled{opacity:.5;cursor:not-allowed}
+.a-g{background:rgba(0,230,138,.1);color:var(--green);border:1px solid rgba(0,230,138,.2)}
+.a-b{background:rgba(123,143,255,.1);color:var(--blue);border:1px solid rgba(123,143,255,.2)}
+.a-a{background:rgba(255,184,50,.1);color:var(--amber);border:1px solid rgba(255,184,50,.2)}
+.aico{font-size:20px;width:28px;text-align:center}
+.albl{flex:1}.asub{font-size:12px;font-weight:400;opacity:.7;display:block;margin-top:1px}
+.achev{font-size:18px;opacity:.5}
+
+/* ── ACTIVITY ── */
+.logitem{padding:9px 0;border-bottom:1px solid var(--border)}
+.logitem:last-child{border-bottom:none}
+.logmsg{font-size:13px;line-height:1.4}
+.logtime{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
+
+/* ── EXTRA STATS ROW ── */
+.xrow{display:flex;justify-content:space-between;padding:2px 0}
+.xitem{text-align:center}
+.xval{font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.xlbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+
+/* ── SKELETON ── */
+.sk{background:linear-gradient(90deg,var(--surf) 25%,var(--surf2) 50%,var(--surf) 75%);
+  background-size:200% 100%;animation:sh 1.5s infinite;border-radius:8px}
+@keyframes sh{0%{background-position:-200% 0}100%{background-position:200% 0}}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:calc(var(--nav) + 12px);left:50%;
+  transform:translateX(-50%) translateY(12px);
+  background:var(--surf2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 18px;font-size:13px;font-weight:500;
+  opacity:0;transition:all .3s;z-index:200;white-space:nowrap;pointer-events:none
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── SPIN ── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinning{display:inline-block;animation:spin .8s linear infinite}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ DASHBOARD ═══════════ -->
+<div id="tab-dashboard" class="panel active">
+  <div class="phdr">
+    <span class="ptitle">Dashboard</span>
+    <button class="rbtn" onclick="loadAll(this)" title="Rafraichir">&#8635;</button>
+  </div>
+
+  <div class="br-card">
+    <div class="br-label">Bankroll</div>
+    <div class="br-value pos" id="br-val">— €</div>
+    <div class="br-net" id="br-net">—</div>
+    <div class="spark"><svg id="sparkline" viewBox="0 0 300 56" preserveAspectRatio="none"></svg></div>
+  </div>
+
+  <div class="stats">
+    <div class="scard">
+      <div class="sval pos" id="s-taux">—</div>
+      <div class="slbl">Réussite</div>
+    </div>
+    <div class="scard">
+      <div class="sval pos" id="s-gagnes">—</div>
+      <div class="slbl">Gagnés</div>
+    </div>
+    <div class="scard">
+      <div class="sval neg" id="s-perdus">—</div>
+      <div class="slbl">Perdus</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="xrow">
+      <div class="xitem">
+        <div class="xval" id="s-roi">—</div>
+        <div class="xlbl">ROI</div>
+      </div>
+      <div class="xitem">
+        <div class="xval" style="color:var(--amber)" id="s-attente">—</div>
+        <div class="xlbl">En attente</div>
+      </div>
+      <div class="xitem">
+        <div class="xval" id="s-total">—</div>
+        <div class="xlbl">Total paris</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stitle">Activité récente</div>
+  <div class="card" id="act-recent">
+    <div class="sk" style="height:13px;margin-bottom:8px;width:68%"></div>
+    <div class="sk" style="height:13px;margin-bottom:8px;width:45%"></div>
+    <div class="sk" style="height:13px;width:75%"></div>
+  </div>
+</div>
+
+<!-- ═══════════ PARIS ═══════════ -->
+<div id="tab-paris" class="panel">
+  <div class="phdr">
+    <span class="ptitle">Paris</span>
+    <button class="rbtn" onclick="loadAll(this)">&#8635;</button>
+  </div>
+  <div class="frow">
+    <button class="fbtn active" onclick="filterParis('all',this)">Tous</button>
+    <button class="fbtn" onclick="filterParis('EN ATTENTE',this)">En attente</button>
+    <button class="fbtn" onclick="filterParis('GAGN\\u00c9',this)">Gagnés</button>
+    <button class="fbtn" onclick="filterParis('PERDU',this)">Perdus</button>
+  </div>
+  <div id="paris-list">
+    <div class="sk" style="height:90px;margin-bottom:8px;border-radius:14px"></div>
+    <div class="sk" style="height:90px;margin-bottom:8px;border-radius:14px"></div>
+    <div class="sk" style="height:90px;border-radius:14px"></div>
+  </div>
+</div>
+
+<!-- ═══════════ ACTIONS ═══════════ -->
+<div id="tab-actions" class="panel">
+  <div class="phdr"><span class="ptitle">Actions</span></div>
+
+  <button class="abtn a-g" onclick="doAction('collecte',this)">
+    <span class="aico">&#128225;</span>
+    <span class="albl">Forcer collecte<span class="asub">Matchs, stats &amp; cotes</span></span>
+    <span class="achev">&#8250;</span>
+  </button>
+
+  <button class="abtn a-b" onclick="doAction('analyse',this)">
+    <span class="aico">&#129504;</span>
+    <span class="albl">Lancer analyse<span class="asub">Détection paris à valeur</span></span>
+    <span class="achev">&#8250;</span>
+  </button>
+
+  <button class="abtn a-a" onclick="doAction('maj',this)">
+    <span class="aico">&#128260;</span>
+    <span class="albl">Maj résultats<span class="asub">Mise à jour gains / pertes</span></span>
+    <span class="achev">&#8250;</span>
+  </button>
+
+  <div class="stitle" style="margin-top:6px">Journal d'activité</div>
+  <div class="card" id="act-full">
+    <div class="sk" style="height:13px;margin-bottom:8px;width:68%"></div>
+    <div class="sk" style="height:13px;margin-bottom:8px;width:45%"></div>
+    <div class="sk" style="height:13px;width:75%"></div>
+  </div>
+</div>
+
+<!-- ═══════════ BOTTOM NAV ═══════════ -->
+<nav class="bnav">
+  <button class="nbtn active" id="nav-dashboard" onclick="goTab('dashboard')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+    </svg>
+    Dashboard
+  </button>
+  <button class="nbtn" id="nav-paris" onclick="goTab('paris')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+    Paris
+  </button>
+  <button class="nbtn" id="nav-actions" onclick="goTab('actions')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.07 4.93A10 10 0 0 0 4.93 19.07M4.93 4.93A10 10 0 0 1 19.07 19.07"/>
+    </svg>
+    Actions
+  </button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+let allParis = [], curFilter = 'all';
+
+/* ── TAB SWITCH ── */
+function goTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nbtn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+}
+
+/* ── TOAST ── */
+function toast(msg, color) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.color = color || 'var(--text)';
+  t.classList.add('show');
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+/* ── FORMAT ── */
+function eur(v) {
+  return v.toLocaleString('fr-FR', {style:'currency',currency:'EUR',maximumFractionDigits:2});
+}
+
+/* ── SPARKLINE ── */
+function sparkline(data) {
+  if (!data || data.length < 2) return;
+  const W = 300, H = 56, pad = 4;
+  const mn = Math.min(...data), mx = Math.max(...data), rng = mx - mn || 1;
+  const pts = data.map((v, i) => [
+    (i / (data.length - 1)) * W,
+    H - pad - ((v - mn) / rng) * (H - pad * 2)
+  ]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('');
+  const area = line + ' L' + pts[pts.length-1][0] + ',' + H + ' L0,' + H + ' Z';
+  const up = data[data.length-1] >= data[0];
+  const col = up ? '#00e68a' : '#ff4d6a';
+  const last = pts[pts.length-1];
+  document.getElementById('sparkline').innerHTML =
+    '<defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0%" stop-color="' + col + '" stop-opacity=".25"/>' +
+    '<stop offset="100%" stop-color="' + col + '" stop-opacity="0"/></linearGradient></defs>' +
+    '<path d="' + area + '" fill="url(#sg)"/>' +
+    '<path d="' + line + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="3.5" fill="' + col + '"/>';
+}
+
+/* ── LOAD DASHBOARD ── */
+async function loadDashboard() {
+  const r = await fetch('/api/dashboard');
+  const d = await r.json();
+  allParis = d.paris || [];
+
+  const br = d.bankroll;
+  const brEl = document.getElementById('br-val');
+  brEl.textContent = eur(br);
+  brEl.className = 'br-value ' + (br >= 1000 ? 'pos' : 'neg');
+
+  const net = d.net;
+  const netEl = document.getElementById('br-net');
+  netEl.textContent = (net >= 0 ? '+' : '') + eur(net) + ' net  ·  ROI ' + (d.roi >= 0 ? '+' : '') + d.roi + '%';
+  netEl.className = 'br-net ' + (net >= 0 ? 'pos' : 'neg');
+
+  document.getElementById('s-taux').textContent = d.taux_vic + '%';
+  document.getElementById('s-gagnes').textContent = d.gagnes;
+  document.getElementById('s-perdus').textContent = d.perdus;
+
+  const roi = d.roi;
+  const roiEl = document.getElementById('s-roi');
+  roiEl.textContent = (roi >= 0 ? '+' : '') + roi + '%';
+  roiEl.style.color = roi >= 0 ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('s-attente').textContent = d.en_attente;
+  document.getElementById('s-total').textContent = d.total;
+
+  sparkline(d.historique);
+  renderParis(allParis, curFilter);
+}
+
+/* ── LOAD ACTIVITY ── */
+async function loadActivity() {
+  const r = await fetch('/api/activity');
+  const data = await r.json();
+
+  const row = items => items.map(a =>
+    '<div class="logitem"><div class="logmsg">' + esc(a.message) + '</div>' +
+    '<div class="logtime">' + a.timestamp + '</div></div>'
+  ).join('') || '<div style="color:var(--muted);font-size:13px">Aucune activité</div>';
+
+  document.getElementById('act-recent').innerHTML = row(data.slice(0, 5));
+  document.getElementById('act-full').innerHTML = row(data);
+}
+
+/* ── RENDER PARIS ── */
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function filterParis(filter, btn) {
+  curFilter = filter;
+  document.querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderParis(allParis, filter);
+}
+
+function renderParis(paris, filter) {
+  const list = filter === 'all' ? paris : paris.filter(p => p.resultat === filter);
+  const el = document.getElementById('paris-list');
+  if (!list.length) {
+    el.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:28px 16px;font-size:14px">Aucun pari</div>';
+    return;
+  }
+  el.innerHTML = list.map(p => {
+    const isW = p.resultat === 'GAGN\\u00c9', isL = p.resultat === 'PERDU';
+    const bc = isW ? 'bw' : isL ? 'bl' : 'ba';
+    const bt = isW ? '&#10003; GAGN\\u00c9' : isL ? '&#10007; PERDU' : '&#9203; ATTENTE';
+    const gain = isW
+      ? '<span style="color:var(--green);font-weight:600">+' + (p.gain_net||0).toFixed(2) + ' &#8364;</span>'
+      : isL
+      ? '<span style="color:var(--red);font-weight:600">-' + (p.mise||0).toFixed(2) + ' &#8364;</span>'
+      : '<span style="color:var(--muted)">' + (p.gain_potentiel||0).toFixed(2) + ' &#8364; pot.</span>';
+    return '<div class="pitem">' +
+      '<div class="phd"><div class="pmatch">' + esc(p.match_nom) + '</div>' +
+      '<span class="badge ' + bc + '">' + bt + '</span></div>' +
+      '<div class="pmeta">' + esc(p.ligue||'') + ' &middot; ' + esc(p.date_match||'') + '</div>' +
+      '<div class="pdet">' +
+      '<div class="pd">Type <b>' + esc(p.type_pari||'') + '</b></div>' +
+      '<div class="pd">Cote <b>' + (p.cote||0) + '</b></div>' +
+      '<div class="pd">Mise <b>' + (p.mise||0) + ' &#8364;</b></div>' +
+      '<div class="pd">' + gain + '</div>' +
+      '</div></div>';
+  }).join('');
+}
+
+/* ── ACTIONS ── */
+async function doAction(action, btn) {
+  const urls = {collecte:'/api/forcer-collecte',analyse:'/api/forcer-analyse',maj:'/api/forcer-maj'};
+  const labels = {collecte:'Collecte',analyse:'Analyse',maj:'Mise \\u00e0 jour'};
+  btn.disabled = true;
+  const chev = btn.querySelector('.achev');
+  if (chev) chev.innerHTML = '<span class="spinning">&#8635;</span>';
+  toast(labels[action] + ' en cours\\u2026');
+  try {
+    const r = await fetch(urls[action], {method:'POST'});
+    const d = await r.json();
+    toast('\\u2713 ' + (d.message || labels[action] + ' termin\\u00e9e'), 'var(--green)');
+    await loadAll();
+  } catch(e) {
+    toast('Erreur', 'var(--red)');
+  } finally {
+    btn.disabled = false;
+    if (chev) chev.textContent = '\\u203a';
+  }
+}
+
+/* ── REFRESH BTN ── */
+async function loadAll(btn) {
+  if (btn) { btn.classList.add('spinning'); }
+  try { await Promise.all([loadDashboard(), loadActivity()]); }
+  catch(e) { toast('Erreur de chargement', 'var(--red)'); }
+  finally { if (btn) btn.classList.remove('spinning'); }
+}
+
+/* ── SERVICE WORKER ── */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+/* ── INIT ── */
+loadAll();
+</script>
+</body>
+</html>"""
+
+
 @app.route("/")
-@app.route("/<path:path>")
-def serve_frontend(path=""):
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, "index.html")
+def serve_frontend():
+    return _HTML
+
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    return jsonify({
+        "name": "Paris IA",
+        "short_name": "Paris IA",
+        "description": "Intelligence artificielle pour paris sportifs",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0a0a0f",
+        "theme_color": "#0a0a0f",
+        "orientation": "portrait-primary",
+        "icons": [
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    })
+
+
+@app.route("/icon-192.png")
+def icon192():
+    return send_from_directory("../frontend/public", "icon-192.png")
+
+
+@app.route("/icon-512.png")
+def icon512():
+    return send_from_directory("../frontend/public", "icon-512.png")
+
+
+@app.route("/sw.js")
+def service_worker():
+    sw = """
+const CACHE = 'paris-ia-v1';
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.add('/')));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => clients.claim())
+  );
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.url.includes('/api/')) return;
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const fresh = fetch(e.request).then(res => {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return res;
+      });
+      return cached || fresh;
+    })
+  );
+});
+
+self.addEventListener('push', e => {
+  if (!e.data) return;
+  const d = e.data.json();
+  e.waitUntil(self.registration.showNotification(d.title, {
+    body: d.body,
+    icon: '/icon-192.png',
+    data: { url: d.url || '/' }
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.openWindow(e.notification.data.url));
+});
+"""
+    return Response(sw, mimetype="application/javascript")
 
 
 # ─────────────────────────────────────────────
