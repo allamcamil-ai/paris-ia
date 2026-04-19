@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: paris-ia
+    runtime: python
+    region: frankfurt
+    plan: free
+    buildCommand: |
+      cd backend && pip install -r requirements.txt
+      cd ../frontend && npm install && npm run build
+      cp -r build ../backend/
+    startCommand: cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --preload
+    envVars:
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_EMAIL
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: NODE_VERSION
+        value: 20

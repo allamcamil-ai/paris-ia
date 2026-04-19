@@ -1,0 +1,8 @@
+node_modules/
+build/
+__pycache__/
+*.pyc
+.env
+*.db
+push_subscriptions.json
+paris_virtuels.csv
