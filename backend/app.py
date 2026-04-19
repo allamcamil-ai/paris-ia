@@ -727,6 +727,7 @@ def api_import_historique():
     total_inseres = 0
     total_doublons = 0
     errors = []
+    debug_first = None  # première réponse brute de l'API (sans la clé)
 
     for nom, lid in LIGUES_FOOTBALL.items():
         log_activity("import", f"Import historique {nom}…")
@@ -739,6 +740,16 @@ def api_import_historique():
                     params={"league": lid, "season": SAISON, "status": "FT", "page": page},
                     timeout=15,
                 )
+                if debug_first is None:
+                    raw = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text[:500]
+                    debug_first = {
+                        "http_status": resp.status_code,
+                        "api_errors": raw.get("errors") if isinstance(raw, dict) else raw,
+                        "results":    raw.get("results") if isinstance(raw, dict) else None,
+                        "paging":     raw.get("paging")  if isinstance(raw, dict) else None,
+                        "sample":     raw.get("response", [])[:1] if isinstance(raw, dict) else None,
+                    }
+
                 if resp.status_code != 200:
                     errors.append(f"{nom} p{page}: HTTP {resp.status_code}")
                     break
@@ -803,6 +814,7 @@ def api_import_historique():
         "inseres": total_inseres,
         "doublons": total_doublons,
         "errors": errors,
+        "debug_api": debug_first,
     })
 
 
